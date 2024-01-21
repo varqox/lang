@@ -1,0 +1,87 @@
+// Type
+// !;
+// abc;
+// abc::efg::xyz;
+// abc<efg, bbb<>, hij<ccc, ddd<>>>::xyz<aaa>;
+
+// Expression
+// return -!42;
+// x = 42 + 3 - 8 > (8 > 8);
+// !-42 as u32 as xyz<42>;
+// ::abc<42, 8, 4>::xyz(4 + 3, a, x)(x<>,);
+// if x == y {
+//     a = b
+// } else if 8 {
+//     const 42;
+//     const i = 8 = 4;
+//     const x = 444;
+// }
+// while x == y {
+//     const b'a';
+//     const b'\x64';
+//     const b"\n\rabc\x13";
+// }
+// [abc; 4]
+// { let x: [i32; 4 + 4] = (); }
+// { let x: (i32, abc<4 + 4>, (), &i32, &&i32) = (); }
+// &&mut x + *::y;
+// { let mut x = y; }
+// fn abc<T, const F: (i32, str)>(mut x: &i32, y: T) {}
+// pub struct X<A, B>(A, B);
+// pub struct X<A, B> {
+//     pub x: A,
+//     y: i32,
+// }
+// type ABC<X, const A: u32> = Y<X, A + 1, { let a: ::x<4> = 42; }>;
+// use ::std::Vec;
+// const a<T, const x: T>: T = x + 1 + 2;
+
+// #
+
+// ::abc<42, 8, 4>::xyz(4 + 3, a, x)(x<>,).42;
+
+// !42;
+// return 4_2___usize;
+// return _;
+// // return return _;
+// abc + (42);
+// abc + (42,);
+// abc + (42, 8);
+// abc + (42, 8,);
+
+mod test;
+pub mod pub_mod;
+
+struct A {}
+
+struct Abc {
+    a: xyz,
+    pub b: i32,
+}
+
+#[derive(Eq)]
+struct Xyz(abc, pub i32);
+
+struct X<
+    T,
+    const N: (i32, test::X),
+> {
+    x: (T, (u32, i8)),
+    y: (),
+}
+
+fn foo() {}
+
+fn bar<T, const N: (i32, u8)>() {
+    42;
+    b"abc";
+    b"\\\"\n\t\r\0";
+    b'x';
+    b'\'';
+    b'\\';
+    b'\n';
+    b'\t';
+    b'\r';
+    b'\0';
+    Vec<i32>::push;
+}
