@@ -445,6 +445,166 @@ enum StructOrTupleStruct<'code, 'lexed> {
     TupleStruct(TupleStruct<'code, 'lexed>),
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+enum ExpressionOperator {
+    Return,
+    Equal,
+    PlusEqual,
+    MinusEqual,
+    StarEqual,
+    SlashEqual,
+    PercentEqual,
+    LogicOrEqual,
+    LogicAndEqual,
+    LogicXorEqual,
+    LogicShiftLeftEqual,
+    LogicShiftRightEqual,
+    LogicOr,
+    LogicAnd,
+    LogicXor,
+    LogicShiftLeft,
+    LogicShiftRight,
+    LazyBoolOr,
+    LazyBoolAnd,
+    Less,
+    Greater,
+    EqualEqual,
+    NotEqual,
+    LessEqual,
+    GreaterEqual,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    CastAs,
+    Const,
+    TakeReference,
+    TakeMutReference,
+    Dereference,
+    BoolNegation,
+    ArithmeticNegation,
+    Dot,
+    Call,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ExpressionOperatorAssociativity {
+    Left,  // ... op ... op ... <=> (... op ...) op ...
+    Right, // ... op ... op ... <=> ... op (... op ...)
+    None,  // ... op ... op ... is disallowed
+}
+
+#[derive(Debug)]
+struct ExpressionOperatorInfo {
+    priority: u8,
+    associativity: ExpressionOperatorAssociativity,
+    // Whether to allow e.g. ... && ... || ... or not
+    associates_with_other_of_the_same_priority: bool,
+}
+
+impl ExpressionOperator {
+    fn to_info(&self) -> ExpressionOperatorInfo {
+        use ExpressionOperatorAssociativity::Left as AssocLeft;
+        use ExpressionOperatorAssociativity::None as AssocNone;
+        use ExpressionOperatorAssociativity::Right as AssocRight;
+        let op_info = |priority, associativity, associates_with_other_of_the_same_priority| {
+            ExpressionOperatorInfo {
+                priority,
+                associativity,
+                associates_with_other_of_the_same_priority,
+            }
+        };
+        match self {
+            Self::Return => op_info(0, AssocNone, false),
+            Self::Equal
+            | Self::PlusEqual
+            | Self::MinusEqual
+            | Self::StarEqual
+            | Self::SlashEqual
+            | Self::PercentEqual
+            | Self::LogicOrEqual
+            | Self::LogicAndEqual
+            | Self::LogicXorEqual
+            | Self::LogicShiftLeftEqual
+            | Self::LogicShiftRightEqual => op_info(1, AssocNone, false),
+            Self::LogicOr
+            | Self::LogicAnd
+            | Self::LogicXor
+            | Self::LogicShiftLeft
+            | Self::LogicShiftRight => op_info(2, AssocLeft, false),
+            Self::LazyBoolOr => op_info(3, AssocRight, false),
+            Self::LazyBoolAnd => op_info(4, AssocRight, false),
+            Self::Less
+            | Self::Greater
+            | Self::EqualEqual
+            | Self::NotEqual
+            | Self::LessEqual
+            | Self::GreaterEqual => op_info(5, AssocNone, false),
+            Self::Plus | Self::Minus => op_info(6, AssocLeft, true),
+            Self::Star | Self::Slash | Self::Percent => op_info(7, AssocLeft, true),
+            Self::CastAs => op_info(8, AssocLeft, false),
+            Self::Const => op_info(9, AssocRight, false),
+            Self::TakeReference
+            | Self::TakeMutReference
+            | Self::Dereference
+            | Self::ArithmeticNegation
+            | Self::BoolNegation => op_info(10, AssocNone, false),
+            Self::Dot | Self::Call => op_info(11, AssocLeft, true),
+        }
+    }
+
+    fn to_print_string(&self) -> &'static str {
+        match self {
+            Self::Return => "return",
+            Self::Equal => "=",
+            Self::PlusEqual => "+=",
+            Self::MinusEqual => "-=",
+            Self::StarEqual => "*=",
+            Self::SlashEqual => "/=",
+            Self::PercentEqual => "%=",
+            Self::LogicOrEqual => "|=",
+            Self::LogicAndEqual => "&=",
+            Self::LogicXorEqual => "^=",
+            Self::LogicShiftLeftEqual => "<<=",
+            Self::LogicShiftRightEqual => ">>=",
+            Self::LogicOr => "|",
+            Self::LogicAnd => "&",
+            Self::LogicXor => "^",
+            Self::LogicShiftLeft => "<<",
+            Self::LogicShiftRight => ">>",
+            Self::LazyBoolOr => "||",
+            Self::LazyBoolAnd => "&&",
+            Self::Less => "<",
+            Self::Greater => ">",
+            Self::EqualEqual => "==",
+            Self::NotEqual => "!=",
+            Self::LessEqual => "<=",
+            Self::GreaterEqual => ">=",
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Star => "*",
+            Self::Slash => "/",
+            Self::Percent => "%",
+            Self::CastAs => "as",
+            Self::Const => "const",
+            Self::TakeReference => "&",
+            Self::TakeMutReference => "&mut",
+            Self::Dereference => "*",
+            Self::BoolNegation => "!",
+            Self::ArithmeticNegation => "-",
+            Self::Dot => ".",
+            Self::Call => panic!("BUG: should not be called"),
+        }
+    }
+}
+#[derive(Debug)]
+struct ExpressionOperatorWithLeftExpr<'code, 'lexed> {
+    operator_span: Span<'code, 'lexed>,
+    operator: ExpressionOperator,
+    left_expr: Option<Expression<'code, 'lexed>>,
+}
+
 impl<'code, 'lexed> Parser<'code, 'lexed> {
     fn end_span(&self, state: &State, span_start: &SpanStart) -> Span<'code, 'lexed> {
         &self.lexed_program.tokens[span_start.token_idx..state.current_token_idx]
@@ -824,590 +984,441 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
+    fn expression_parser_fold_stack(
+        &self,
+        stack: &mut Vec<ExpressionOperatorWithLeftExpr<'code, 'lexed>>,
+        expr: Expression<'code, 'lexed>,
+        next_op: Option<(ExpressionOperator, &Span<'code, 'lexed>)>,
+    ) -> Expression<'code, 'lexed> {
+        let next_op_info = next_op.as_ref().map(|(operator, _)| operator.to_info());
+        let mut expr = Some(expr);
+        while !stack.is_empty() {
+            let last_op = stack.last().unwrap();
+            let last_op_operator = last_op.operator.clone();
+            let last_op_operator_span = last_op.operator_span;
+            let last_op_info = last_op_operator.to_info();
+            let mut fold = || {
+                let ExpressionOperatorWithLeftExpr {
+                    operator_span,
+                    operator,
+                    left_expr,
+                } = stack.pop().unwrap();
+                macro_rules! unary_op {
+                    ($expression_kind:ident) => {{
+                        expr = Some(Expression {
+                            span: self.overspan(&operator_span, &expr.as_ref().unwrap().span),
+                            kind: ExpressionKind::$expression_kind(Box::new(expr.take().unwrap())),
+                        })
+                    }};
+                }
+                macro_rules! binary_op {
+                    ($expression_kind:ident) => {{
+                        let left_expr = left_expr.unwrap();
+                        let right_expr = expr.take().unwrap();
+                        expr = Some(Expression {
+                            span: self.overspan(&left_expr.span, &right_expr.span),
+                            kind: ExpressionKind::$expression_kind(
+                                Box::new(left_expr),
+                                Box::new(right_expr),
+                            ),
+                        })
+                    }};
+                }
+
+                match operator {
+                    ExpressionOperator::ArithmeticNegation => unary_op!(ArithmeticNegation),
+                    ExpressionOperator::BoolNegation => unary_op!(BoolNegation),
+                    ExpressionOperator::Const => unary_op!(Const),
+                    ExpressionOperator::Dereference => unary_op!(Dereference),
+                    ExpressionOperator::Equal => binary_op!(Assign),
+                    ExpressionOperator::EqualEqual => binary_op!(CompareEqual),
+                    ExpressionOperator::Greater => binary_op!(CompareGreater),
+                    ExpressionOperator::GreaterEqual => binary_op!(CompareGreaterEqual),
+                    ExpressionOperator::LazyBoolAnd => binary_op!(LazyBoolAnd),
+                    ExpressionOperator::LazyBoolOr => binary_op!(LazyBoolOr),
+                    ExpressionOperator::Less => binary_op!(CompareLess),
+                    ExpressionOperator::LessEqual => binary_op!(CompareLessEqual),
+                    ExpressionOperator::LogicAnd => binary_op!(LogicAnd),
+                    ExpressionOperator::LogicAndEqual => binary_op!(LogicAndAssign),
+                    ExpressionOperator::LogicOr => binary_op!(LogicOr),
+                    ExpressionOperator::LogicOrEqual => binary_op!(LogicOrAssign),
+                    ExpressionOperator::LogicShiftLeft => binary_op!(LogicShiftLeft),
+                    ExpressionOperator::LogicShiftLeftEqual => binary_op!(LogicShiftLeftAssign),
+                    ExpressionOperator::LogicShiftRight => binary_op!(LogicShiftRight),
+                    ExpressionOperator::LogicShiftRightEqual => binary_op!(LogicShiftRightAssign),
+                    ExpressionOperator::LogicXor => binary_op!(LogicXor),
+                    ExpressionOperator::LogicXorEqual => binary_op!(LogicXorAssign),
+                    ExpressionOperator::Minus => binary_op!(Minus),
+                    ExpressionOperator::MinusEqual => binary_op!(MinusAssign),
+                    ExpressionOperator::NotEqual => binary_op!(CompareNotEqual),
+                    ExpressionOperator::Percent => binary_op!(DivideRemainter),
+                    ExpressionOperator::PercentEqual => binary_op!(DivideRemainderAssign),
+                    ExpressionOperator::Plus => binary_op!(Plus),
+                    ExpressionOperator::PlusEqual => binary_op!(PlusAssign),
+                    ExpressionOperator::Return => unary_op!(Return),
+                    ExpressionOperator::Slash => binary_op!(Divide),
+                    ExpressionOperator::SlashEqual => binary_op!(DivideAssign),
+                    ExpressionOperator::Star => binary_op!(Multiply),
+                    ExpressionOperator::StarEqual => binary_op!(MultiplyAssign),
+                    ExpressionOperator::TakeMutReference => unary_op!(TakeMutReference),
+                    ExpressionOperator::TakeReference => unary_op!(TakeReference),
+                    ExpressionOperator::CastAs
+                    | ExpressionOperator::Dot
+                    | ExpressionOperator::Call => {
+                        panic!("BUG: {:?} operator should not be on the stack", operator)
+                    }
+                }
+            };
+
+            let Some(next_op_info) = &next_op_info else {
+                fold();
+                continue;
+            };
+            if last_op_info.priority > next_op_info.priority {
+                fold();
+                continue;
+            }
+            if last_op_info.priority == next_op_info.priority {
+                assert!(last_op_info.associativity == next_op_info.associativity);
+                assert!(
+                    last_op_info.associates_with_other_of_the_same_priority
+                        == next_op_info.associates_with_other_of_the_same_priority
+                );
+                let (next_operator, next_op_span) = next_op.as_ref().unwrap();
+                if &last_op_operator != next_operator
+                    && !last_op_info.associates_with_other_of_the_same_priority
+                {
+                    self.lexed_program.error_on(
+                        &self.overspan(&last_op_operator_span, &next_op_span),
+                        format_args!(
+                            "combining {} and {} without parenthesis is disallowed",
+                            last_op_operator.to_print_string(),
+                            next_operator.to_print_string()
+                        ),
+                        format_args!(
+                            "cannot combine these operators, use parenthesis around one of them"
+                        ),
+                    );
+                }
+                match last_op_info.associativity {
+                    ExpressionOperatorAssociativity::None => self.lexed_program.error_on(
+                        &self.overspan(&last_op_operator_span, &next_op_span),
+                        format_args!(
+                            "combining {} and {} without parenthesis is disallowed",
+                            last_op_operator.to_print_string(),
+                            next_operator.to_print_string()
+                        ),
+                        format_args!(
+                            "cannot combine these operators, use parenthesis around one of them"
+                        ),
+                    ),
+                    ExpressionOperatorAssociativity::Left => {
+                        fold();
+                        continue;
+                    }
+                    ExpressionOperatorAssociativity::Right => {
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+        expr.unwrap()
+    }
+
+    fn expression_parser_extract_simple_expression(
+        &self,
+        state: &mut State,
+        stack: &mut Vec<ExpressionOperatorWithLeftExpr<'code, 'lexed>>,
+    ) -> Expression<'code, 'lexed> {
+        loop {
+            let expr_span_start = state.start_span();
+            let Some(token) = self.peek_token(state) else {
+                self.unexpected_eof(format_args!("expression"))
+            };
+            match token.kind {
+                TokenKind::Underscore => {
+                    self.extract_token(state);
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::Underscore,
+                    };
+                }
+                TokenKind::KeywordContinue => {
+                    self.extract_token(state);
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::Continue,
+                    };
+                }
+                TokenKind::KeywordBreak => {
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::Break,
+                    };
+                }
+                TokenKind::Integer => {
+                    let integer_literal = self.extract_integer_literal(state);
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::IntegerLiteral(integer_literal),
+                    };
+                }
+                TokenKind::Byte => {
+                    let bytes = self.extract_byte_or_bytes_literal(state, TokenKind::Byte);
+                    let span = self.end_span(state, &expr_span_start);
+                    match bytes.len() {
+                        0 => self.lexed_program.error_on(
+                            span,
+                            format_args!("empty byte literal"),
+                            format_args!("empty byte literal"),
+                        ),
+                        1 => {
+                            break Expression {
+                                span,
+                                kind: ExpressionKind::ByteLiteral(bytes[0]),
+                            }
+                        }
+                        _ => self.lexed_program.error_on(
+                            span,
+                            format_args!("byte literal has to have length 1"),
+                            format_args!("byte literal has to have length 1"),
+                        ),
+                    }
+                }
+                TokenKind::ByteString => {
+                    let bytes = self.extract_byte_or_bytes_literal(state, TokenKind::ByteString);
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::ByteStringLiteral(bytes),
+                    };
+                }
+                TokenKind::Identifier => {
+                    let ident = self.extract_identifier(state);
+                    break Expression {
+                        span: ident.span,
+                        kind: ExpressionKind::Path(Path {
+                            span: ident.span,
+                            global: false,
+                            segments: vec![PathSegment {
+                                span: ident.span,
+                                identifier: ident,
+                                generic_args: None,
+                            }],
+                        }),
+                    };
+                }
+                TokenKind::ColonColon => {
+                    self.extract_token(state);
+                    let ident = self.extract_identifier(state);
+                    let span = self.end_span(state, &expr_span_start);
+                    break Expression {
+                        span,
+                        kind: ExpressionKind::Path(Path {
+                            span,
+                            global: true,
+                            segments: vec![PathSegment {
+                                span: ident.span,
+                                identifier: ident,
+                                generic_args: None,
+                            }],
+                        }),
+                    };
+                }
+                TokenKind::Lparen => {
+                    let extracted_sequence = self
+                        .extract_sequence_with_optional_trailing_separator_using_function(
+                            state,
+                            TokenKind::Lparen,
+                            |this: &Parser, state: &mut State| {
+                                this.extract_expression(
+                                    state,
+                                    &[TokenKind::Rparen, TokenKind::Comma],
+                                )
+                            },
+                            "expression",
+                            TokenKind::Comma,
+                            TokenKind::Rparen,
+                        );
+                    let span = self.end_span(state, &expr_span_start);
+                    break if extracted_sequence.elems.len() == 1
+                        && !extracted_sequence.has_trailing_separator
+                    {
+                        extracted_sequence.elems.into_iter().next().unwrap()
+                    } else {
+                        Expression {
+                            span,
+                            kind: ExpressionKind::Tuple(extracted_sequence.elems),
+                        }
+                    };
+                }
+                TokenKind::Lsquare => {
+                    self.extract_token(state);
+                    let expr = self.extract_expression(
+                        state,
+                        &[TokenKind::Rsquare, TokenKind::Semicolon, TokenKind::Comma],
+                    );
+                    break match self.peek_token(state) {
+                        None => self.unexpected_eof(format_args!("] or ; or ,")),
+                        Some(token) if token.kind == TokenKind::Rsquare => {
+                            self.extract_token(state);
+                            Expression {
+                                span: self.end_span(state, &expr_span_start),
+                                kind: ExpressionKind::ArrayLiteral(vec![expr]),
+                            }
+                        }
+                        Some(token) if token.kind == TokenKind::Semicolon => {
+                            self.extract_token(state);
+                            let size_expr = self.extract_expression(state, &[TokenKind::Rsquare]);
+                            self.extract_token_of_kind(state, TokenKind::Rsquare);
+                            Expression {
+                                span: self.end_span(state, &expr_span_start),
+                                kind: ExpressionKind::ArrayWithSize(
+                                    Box::new(expr),
+                                    Box::new(size_expr),
+                                ),
+                            }
+                        }
+                        Some(token) if token.kind == TokenKind::Comma => {
+                            let mut args = self
+                                .extract_sequence_with_optional_trailing_separator_using_function(
+                                    state,
+                                    TokenKind::Comma,
+                                    |this: &Parser, state: &mut State| {
+                                        this.extract_expression(
+                                            state,
+                                            &[TokenKind::Rsquare, TokenKind::Comma],
+                                        )
+                                    },
+                                    "expression",
+                                    TokenKind::Comma,
+                                    TokenKind::Rsquare,
+                                )
+                                .elems;
+                            args.insert(0, expr);
+                            Expression {
+                                span: self.end_span(state, &expr_span_start),
+                                kind: ExpressionKind::ArrayLiteral(args),
+                            }
+                        }
+                        Some(_) => self.unexpected_token(state, format_args!("] or ; or ,")),
+                    };
+                }
+                TokenKind::Lbrace => {
+                    let block_expr = self.extract_block_expression(state);
+                    break Expression {
+                        span: block_expr.span,
+                        kind: ExpressionKind::Block(Box::new(block_expr)),
+                    };
+                }
+                TokenKind::KeywordReturn => {
+                    self.extract_token(state);
+                    stack.push(ExpressionOperatorWithLeftExpr {
+                        operator_span: self.end_span(state, &expr_span_start),
+                        operator: ExpressionOperator::Return,
+                        left_expr: None,
+                    });
+                }
+                TokenKind::Exclamation => {
+                    self.extract_token(state);
+                    stack.push(ExpressionOperatorWithLeftExpr {
+                        operator_span: self.end_span(state, &expr_span_start),
+                        operator: ExpressionOperator::BoolNegation,
+                        left_expr: None,
+                    });
+                }
+                TokenKind::Minus => {
+                    self.extract_token(state);
+                    stack.push(ExpressionOperatorWithLeftExpr {
+                        operator_span: self.end_span(state, &expr_span_start),
+                        operator: ExpressionOperator::ArithmeticNegation,
+                        left_expr: None,
+                    });
+                }
+                TokenKind::Ampersand => {
+                    self.extract_token(state);
+                    let operator = match self.peek_token(state) {
+                        None => self.unexpected_eof(format_args!("mut or expression")),
+                        Some(token) if token.kind == TokenKind::KeywordMut => {
+                            self.extract_token(state);
+                            ExpressionOperator::TakeMutReference
+                        }
+                        _ => ExpressionOperator::TakeReference,
+                    };
+                    stack.push(ExpressionOperatorWithLeftExpr {
+                        operator_span: self.end_span(state, &expr_span_start),
+                        operator,
+                        left_expr: None,
+                    });
+                }
+                TokenKind::Star => {
+                    self.extract_token(state);
+                    stack.push(ExpressionOperatorWithLeftExpr {
+                        operator_span: self.end_span(state, &expr_span_start),
+                        operator: ExpressionOperator::Dereference,
+                        left_expr: None,
+                    });
+                }
+                TokenKind::KeywordConst => {
+                    self.extract_token(state);
+                    stack.push(ExpressionOperatorWithLeftExpr {
+                        operator_span: self.end_span(state, &expr_span_start),
+                        operator: ExpressionOperator::Const,
+                        left_expr: None,
+                    });
+                }
+                TokenKind::KeywordIf => {
+                    let if_expr = self.extract_if_expression(state);
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::If(Box::new(if_expr)),
+                    };
+                }
+                TokenKind::KeywordLoop => {
+                    self.extract_token(state);
+                    let body = self.extract_block_expression(state);
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::Loop(Box::new(body)),
+                    };
+                }
+                TokenKind::KeywordWhile => {
+                    self.extract_token(state);
+                    let condition = self.extract_expression(state, &[TokenKind::Rangle]);
+                    let body = self.extract_block_expression(state);
+                    break Expression {
+                        span: self.end_span(state, &expr_span_start),
+                        kind: ExpressionKind::WhileLoop {
+                            condition: Box::new(condition),
+                            body: Box::new(body),
+                        },
+                    };
+                }
+                _ => self.unexpected_token(state, format_args!("expression")),
+            }
+        }
+    }
+
     fn extract_expression(
         &self,
         state: &mut State,
         end_token_kinds: &[TokenKind],
     ) -> Expression<'code, 'lexed> {
-        #[derive(Debug, PartialEq, Eq, Clone)]
-        enum Operator {
-            Return,
-            Equal,
-            PlusEqual,
-            MinusEqual,
-            StarEqual,
-            SlashEqual,
-            PercentEqual,
-            LogicOrEqual,
-            LogicAndEqual,
-            LogicXorEqual,
-            LogicShiftLeftEqual,
-            LogicShiftRightEqual,
-            LogicOr,
-            LogicAnd,
-            LogicXor,
-            LogicShiftLeft,
-            LogicShiftRight,
-            LazyBoolOr,
-            LazyBoolAnd,
-            Less,
-            Greater,
-            EqualEqual,
-            NotEqual,
-            LessEqual,
-            GreaterEqual,
-            Plus,
-            Minus,
-            Star,
-            Slash,
-            Percent,
-            CastAs,
-            Const,
-            TakeReference,
-            TakeMutReference,
-            Dereference,
-            BoolNegation,
-            ArithmeticNegation,
-            Dot,
-            Call,
-        }
-
-        #[derive(Debug, PartialEq, Eq)]
-        enum OperatorAssociativity {
-            Left,  // ... op ... op ... <=> (... op ...) op ...
-            Right, // ... op ... op ... <=> ... op (... op ...)
-            None,  // ... op ... op ... is disallowed
-        }
-
-        #[derive(Debug)]
-        struct OperatorInfo {
-            priority: u8,
-            associativity: OperatorAssociativity,
-            // Whether to allow e.g. ... && ... || ... or not
-            associates_with_other_of_the_same_priority: bool,
-        }
-
-        impl Operator {
-            fn to_info(&self) -> OperatorInfo {
-                use OperatorAssociativity::Left as AssocLeft;
-                use OperatorAssociativity::None as AssocNone;
-                use OperatorAssociativity::Right as AssocRight;
-                let op_info =
-                    |priority, associativity, associates_with_other_of_the_same_priority| {
-                        OperatorInfo {
-                            priority,
-                            associativity,
-                            associates_with_other_of_the_same_priority,
-                        }
-                    };
-                match self {
-                    Self::Return => op_info(0, AssocNone, false),
-                    Self::Equal
-                    | Self::PlusEqual
-                    | Self::MinusEqual
-                    | Self::StarEqual
-                    | Self::SlashEqual
-                    | Self::PercentEqual
-                    | Self::LogicOrEqual
-                    | Self::LogicAndEqual
-                    | Self::LogicXorEqual
-                    | Self::LogicShiftLeftEqual
-                    | Self::LogicShiftRightEqual => op_info(1, AssocNone, false),
-                    Self::LogicOr
-                    | Self::LogicAnd
-                    | Self::LogicXor
-                    | Self::LogicShiftLeft
-                    | Self::LogicShiftRight => op_info(2, AssocLeft, false),
-                    Self::LazyBoolOr => op_info(3, AssocRight, false),
-                    Self::LazyBoolAnd => op_info(4, AssocRight, false),
-                    Self::Less
-                    | Self::Greater
-                    | Self::EqualEqual
-                    | Self::NotEqual
-                    | Self::LessEqual
-                    | Self::GreaterEqual => op_info(5, AssocNone, false),
-                    Self::Plus | Self::Minus => op_info(6, AssocLeft, true),
-                    Self::Star | Self::Slash | Self::Percent => op_info(7, AssocLeft, true),
-                    Self::CastAs => op_info(8, AssocLeft, false),
-                    Self::Const => op_info(9, AssocRight, false),
-                    Self::TakeReference
-                    | Self::TakeMutReference
-                    | Self::Dereference
-                    | Self::ArithmeticNegation
-                    | Self::BoolNegation => op_info(10, AssocNone, false),
-                    Self::Dot | Self::Call => op_info(11, AssocLeft, true),
-                }
-            }
-
-            fn to_print_string(&self) -> &'static str {
-                match self {
-                    Self::Return => "return",
-                    Self::Equal => "=",
-                    Self::PlusEqual => "+=",
-                    Self::MinusEqual => "-=",
-                    Self::StarEqual => "*=",
-                    Self::SlashEqual => "/=",
-                    Self::PercentEqual => "%=",
-                    Self::LogicOrEqual => "|=",
-                    Self::LogicAndEqual => "&=",
-                    Self::LogicXorEqual => "^=",
-                    Self::LogicShiftLeftEqual => "<<=",
-                    Self::LogicShiftRightEqual => ">>=",
-                    Self::LogicOr => "|",
-                    Self::LogicAnd => "&",
-                    Self::LogicXor => "^",
-                    Self::LogicShiftLeft => "<<",
-                    Self::LogicShiftRight => ">>",
-                    Self::LazyBoolOr => "||",
-                    Self::LazyBoolAnd => "&&",
-                    Self::Less => "<",
-                    Self::Greater => ">",
-                    Self::EqualEqual => "==",
-                    Self::NotEqual => "!=",
-                    Self::LessEqual => "<=",
-                    Self::GreaterEqual => ">=",
-                    Self::Plus => "+",
-                    Self::Minus => "-",
-                    Self::Star => "*",
-                    Self::Slash => "/",
-                    Self::Percent => "%",
-                    Self::CastAs => "as",
-                    Self::Const => "const",
-                    Self::TakeReference => "&",
-                    Self::TakeMutReference => "&mut",
-                    Self::Dereference => "*",
-                    Self::BoolNegation => "!",
-                    Self::ArithmeticNegation => "-",
-                    Self::Dot => ".",
-                    Self::Call => panic!("BUG: should not be called"),
-                }
-            }
-        }
-        #[derive(Debug)]
-        struct OperatorWithLeftExpr<'code, 'lexed> {
-            operator_span: Span<'code, 'lexed>,
-            operator: Operator,
-            left_expr: Option<Expression<'code, 'lexed>>,
-        }
-
-        let mut stack = Vec::<OperatorWithLeftExpr<'code, 'lexed>>::new();
-        let fold_stack = |stack: &mut Vec<OperatorWithLeftExpr<'code, 'lexed>>,
-                          expr: Expression<'code, 'lexed>,
-                          next_op: Option<(Operator, &Span<'code, 'lexed>)>|
-         -> Expression<'code, 'lexed> {
-            let next_op_info = next_op.as_ref().map(|(operator, _)| operator.to_info());
-            let mut expr = Some(expr);
-            while !stack.is_empty() {
-                let last_op = stack.last().unwrap();
-                let last_op_operator = last_op.operator.clone();
-                let last_op_operator_span = last_op.operator_span;
-                let last_op_info = last_op_operator.to_info();
-                let mut fold = || {
-                    let OperatorWithLeftExpr {
-                        operator_span,
-                        operator,
-                        left_expr,
-                    } = stack.pop().unwrap();
-                    macro_rules! unary_op {
-                        ($expression_kind:ident) => {{
-                            expr = Some(Expression {
-                                span: self.overspan(&operator_span, &expr.as_ref().unwrap().span),
-                                kind: ExpressionKind::$expression_kind(Box::new(
-                                    expr.take().unwrap(),
-                                )),
-                            })
-                        }};
-                    }
-                    macro_rules! binary_op {
-                        ($expression_kind:ident) => {{
-                            let left_expr = left_expr.unwrap();
-                            let right_expr = expr.take().unwrap();
-                            expr = Some(Expression {
-                                span: self.overspan(&left_expr.span, &right_expr.span),
-                                kind: ExpressionKind::$expression_kind(
-                                    Box::new(left_expr),
-                                    Box::new(right_expr),
-                                ),
-                            })
-                        }};
-                    }
-
-                    match operator {
-                        Operator::ArithmeticNegation => unary_op!(ArithmeticNegation),
-                        Operator::BoolNegation => unary_op!(BoolNegation),
-                        Operator::Const => unary_op!(Const),
-                        Operator::Dereference => unary_op!(Dereference),
-                        Operator::Equal => binary_op!(Assign),
-                        Operator::EqualEqual => binary_op!(CompareEqual),
-                        Operator::Greater => binary_op!(CompareGreater),
-                        Operator::GreaterEqual => binary_op!(CompareGreaterEqual),
-                        Operator::LazyBoolAnd => binary_op!(LazyBoolAnd),
-                        Operator::LazyBoolOr => binary_op!(LazyBoolOr),
-                        Operator::Less => binary_op!(CompareLess),
-                        Operator::LessEqual => binary_op!(CompareLessEqual),
-                        Operator::LogicAnd => binary_op!(LogicAnd),
-                        Operator::LogicAndEqual => binary_op!(LogicAndAssign),
-                        Operator::LogicOr => binary_op!(LogicOr),
-                        Operator::LogicOrEqual => binary_op!(LogicOrAssign),
-                        Operator::LogicShiftLeft => binary_op!(LogicShiftLeft),
-                        Operator::LogicShiftLeftEqual => binary_op!(LogicShiftLeftAssign),
-                        Operator::LogicShiftRight => binary_op!(LogicShiftRight),
-                        Operator::LogicShiftRightEqual => binary_op!(LogicShiftRightAssign),
-                        Operator::LogicXor => binary_op!(LogicXor),
-                        Operator::LogicXorEqual => binary_op!(LogicXorAssign),
-                        Operator::Minus => binary_op!(Minus),
-                        Operator::MinusEqual => binary_op!(MinusAssign),
-                        Operator::NotEqual => binary_op!(CompareNotEqual),
-                        Operator::Percent => binary_op!(DivideRemainter),
-                        Operator::PercentEqual => binary_op!(DivideRemainderAssign),
-                        Operator::Plus => binary_op!(Plus),
-                        Operator::PlusEqual => binary_op!(PlusAssign),
-                        Operator::Return => unary_op!(Return),
-                        Operator::Slash => binary_op!(Divide),
-                        Operator::SlashEqual => binary_op!(DivideAssign),
-                        Operator::Star => binary_op!(Multiply),
-                        Operator::StarEqual => binary_op!(MultiplyAssign),
-                        Operator::TakeMutReference => unary_op!(TakeMutReference),
-                        Operator::TakeReference => unary_op!(TakeReference),
-                        Operator::CastAs | Operator::Dot | Operator::Call => {
-                            panic!("BUG: {:?} operator should not be on the stack", operator)
-                        }
-                    }
-                };
-
-                let Some(next_op_info) = &next_op_info else {
-                    fold();
-                    continue;
-                };
-                if last_op_info.priority > next_op_info.priority {
-                    fold();
-                    continue;
-                }
-                if last_op_info.priority == next_op_info.priority {
-                    assert!(last_op_info.associativity == next_op_info.associativity);
-                    assert!(
-                        last_op_info.associates_with_other_of_the_same_priority
-                            == next_op_info.associates_with_other_of_the_same_priority
-                    );
-                    let (next_operator, next_op_span) = next_op.as_ref().unwrap();
-                    if &last_op_operator != next_operator
-                        && !last_op_info.associates_with_other_of_the_same_priority
-                    {
-                        self.lexed_program.error_on(
-                                &self.overspan(&last_op_operator_span, &next_op_span),
-                                format_args!(
-                                    "combining {} and {} without parenthesis is disallowed",
-                                    last_op_operator.to_print_string(),
-                                    next_operator.to_print_string()
-                                ),
-                                format_args!(
-                                    "cannot combine these operators, use parenthesis around one of them"
-                                )
-                            );
-                    }
-                    match last_op_info.associativity {
-                            OperatorAssociativity::None => self.lexed_program.error_on(
-                                &self.overspan(&last_op_operator_span, &next_op_span),
-                                format_args!(
-                                    "combining {} and {} without parenthesis is disallowed",
-                                    last_op_operator.to_print_string(),
-                                    next_operator.to_print_string()
-                                ),
-                                format_args!(
-                                    "cannot combine these operators, use parenthesis around one of them"
-                                ),
-                            ),
-                            OperatorAssociativity::Left => {
-                                fold();
-                                continue;
-                            }
-                            OperatorAssociativity::Right => {
-                                break;
-                            }
-                        }
-                }
-                break;
-            }
-            expr.unwrap()
-        };
+        let mut stack = Vec::new();
         'parser_loop: loop {
-            // Extract expression
-            let mut expr = loop {
-                let expr_span_start = state.start_span();
-                let Some(token) = self.peek_token(state) else {
-                    self.unexpected_eof(format_args!("expression"))
-                };
-                match token.kind {
-                    TokenKind::Underscore => {
-                        self.extract_token(state);
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::Underscore,
-                        };
-                    }
-                    TokenKind::KeywordContinue => {
-                        self.extract_token(state);
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::Continue,
-                        };
-                    }
-                    TokenKind::KeywordBreak => {
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::Break,
-                        };
-                    }
-                    TokenKind::Integer => {
-                        let integer_literal = self.extract_integer_literal(state);
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::IntegerLiteral(integer_literal),
-                        };
-                    }
-                    TokenKind::Byte => {
-                        let bytes = self.extract_byte_or_bytes_literal(state, TokenKind::Byte);
-                        let span = self.end_span(state, &expr_span_start);
-                        match bytes.len() {
-                            0 => self.lexed_program.error_on(
-                                span,
-                                format_args!("empty byte literal"),
-                                format_args!("empty byte literal"),
-                            ),
-                            1 => {
-                                break Expression {
-                                    span,
-                                    kind: ExpressionKind::ByteLiteral(bytes[0]),
-                                }
-                            }
-                            _ => self.lexed_program.error_on(
-                                span,
-                                format_args!("byte literal has to have length 1"),
-                                format_args!("byte literal has to have length 1"),
-                            ),
-                        }
-                    }
-                    TokenKind::ByteString => {
-                        let bytes =
-                            self.extract_byte_or_bytes_literal(state, TokenKind::ByteString);
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::ByteStringLiteral(bytes),
-                        };
-                    }
-                    TokenKind::Identifier => {
-                        let ident = self.extract_identifier(state);
-                        break Expression {
-                            span: ident.span,
-                            kind: ExpressionKind::Path(Path {
-                                span: ident.span,
-                                global: false,
-                                segments: vec![PathSegment {
-                                    span: ident.span,
-                                    identifier: ident,
-                                    generic_args: None,
-                                }],
-                            }),
-                        };
-                    }
-                    TokenKind::ColonColon => {
-                        self.extract_token(state);
-                        let ident = self.extract_identifier(state);
-                        let span = self.end_span(state, &expr_span_start);
-                        break Expression {
-                            span,
-                            kind: ExpressionKind::Path(Path {
-                                span,
-                                global: true,
-                                segments: vec![PathSegment {
-                                    span: ident.span,
-                                    identifier: ident,
-                                    generic_args: None,
-                                }],
-                            }),
-                        };
-                    }
-                    TokenKind::Lparen => {
-                        let extracted_sequence = self
-                            .extract_sequence_with_optional_trailing_separator_using_function(
-                                state,
-                                TokenKind::Lparen,
-                                |this: &Parser, state: &mut State| {
-                                    this.extract_expression(
-                                        state,
-                                        &[TokenKind::Rparen, TokenKind::Comma],
-                                    )
-                                },
-                                "expression",
-                                TokenKind::Comma,
-                                TokenKind::Rparen,
-                            );
-                        let span = self.end_span(state, &expr_span_start);
-                        break if extracted_sequence.elems.len() == 1
-                            && !extracted_sequence.has_trailing_separator
-                        {
-                            extracted_sequence.elems.into_iter().next().unwrap()
-                        } else {
-                            Expression {
-                                span,
-                                kind: ExpressionKind::Tuple(extracted_sequence.elems),
-                            }
-                        };
-                    }
-                    TokenKind::Lsquare => {
-                        self.extract_token(state);
-                        let expr = self.extract_expression(
-                            state,
-                            &[TokenKind::Rsquare, TokenKind::Semicolon, TokenKind::Comma],
-                        );
-                        break match self.peek_token(state) {
-                            None => self.unexpected_eof(format_args!("] or ; or ,")),
-                            Some(token) if token.kind == TokenKind::Rsquare => {
-                                self.extract_token(state);
-                                Expression {
-                                    span: self.end_span(state, &expr_span_start),
-                                    kind: ExpressionKind::ArrayLiteral(vec![expr]),
-                                }
-                            }
-                            Some(token) if token.kind == TokenKind::Semicolon => {
-                                self.extract_token(state);
-                                let size_expr =
-                                    self.extract_expression(state, &[TokenKind::Rsquare]);
-                                self.extract_token_of_kind(state, TokenKind::Rsquare);
-                                Expression {
-                                    span: self.end_span(state, &expr_span_start),
-                                    kind: ExpressionKind::ArrayWithSize(
-                                        Box::new(expr),
-                                        Box::new(size_expr),
-                                    ),
-                                }
-                            }
-                            Some(token) if token.kind == TokenKind::Comma => {
-                                let mut args = self
-                                        .extract_sequence_with_optional_trailing_separator_using_function(
-                                            state,
-                                            TokenKind::Comma,
-                                            |this: &Parser, state: &mut State| {
-                                                this.extract_expression(
-                                                    state,
-                                                    &[TokenKind::Rsquare, TokenKind::Comma],
-                                                )
-                                            },
-                                            "expression",
-                                            TokenKind::Comma,
-                                            TokenKind::Rsquare,
-                                        )
-                                        .elems;
-                                args.insert(0, expr);
-                                Expression {
-                                    span: self.end_span(state, &expr_span_start),
-                                    kind: ExpressionKind::ArrayLiteral(args),
-                                }
-                            }
-                            Some(_) => self.unexpected_token(state, format_args!("] or ; or ,")),
-                        };
-                    }
-                    TokenKind::Lbrace => {
-                        let block_expr = self.extract_block_expression(state);
-                        break Expression {
-                            span: block_expr.span,
-                            kind: ExpressionKind::Block(Box::new(block_expr)),
-                        };
-                    }
-                    TokenKind::KeywordReturn => {
-                        self.extract_token(state);
-                        stack.push(OperatorWithLeftExpr {
-                            operator_span: self.end_span(state, &expr_span_start),
-                            operator: Operator::Return,
-                            left_expr: None,
-                        });
-                    }
-                    TokenKind::Exclamation => {
-                        self.extract_token(state);
-                        stack.push(OperatorWithLeftExpr {
-                            operator_span: self.end_span(state, &expr_span_start),
-                            operator: Operator::BoolNegation,
-                            left_expr: None,
-                        });
-                    }
-                    TokenKind::Minus => {
-                        self.extract_token(state);
-                        stack.push(OperatorWithLeftExpr {
-                            operator_span: self.end_span(state, &expr_span_start),
-                            operator: Operator::ArithmeticNegation,
-                            left_expr: None,
-                        });
-                    }
-                    TokenKind::Ampersand => {
-                        self.extract_token(state);
-                        let operator = match self.peek_token(state) {
-                            None => self.unexpected_eof(format_args!("mut or expression")),
-                            Some(token) if token.kind == TokenKind::KeywordMut => {
-                                self.extract_token(state);
-                                Operator::TakeMutReference
-                            }
-                            _ => Operator::TakeReference,
-                        };
-                        stack.push(OperatorWithLeftExpr {
-                            operator_span: self.end_span(state, &expr_span_start),
-                            operator,
-                            left_expr: None,
-                        });
-                    }
-                    TokenKind::Star => {
-                        self.extract_token(state);
-                        stack.push(OperatorWithLeftExpr {
-                            operator_span: self.end_span(state, &expr_span_start),
-                            operator: Operator::Dereference,
-                            left_expr: None,
-                        });
-                    }
-                    TokenKind::KeywordConst => {
-                        self.extract_token(state);
-                        stack.push(OperatorWithLeftExpr {
-                            operator_span: self.end_span(state, &expr_span_start),
-                            operator: Operator::Const,
-                            left_expr: None,
-                        });
-                    }
-                    TokenKind::KeywordIf => {
-                        let if_expr = self.extract_if_expression(state);
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::If(Box::new(if_expr)),
-                        };
-                    }
-                    TokenKind::KeywordLoop => {
-                        self.extract_token(state);
-                        let body = self.extract_block_expression(state);
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::Loop(Box::new(body)),
-                        };
-                    }
-                    TokenKind::KeywordWhile => {
-                        self.extract_token(state);
-                        let condition = self.extract_expression(state, &[TokenKind::Rangle]);
-                        let body = self.extract_block_expression(state);
-                        break Expression {
-                            span: self.end_span(state, &expr_span_start),
-                            kind: ExpressionKind::WhileLoop {
-                                condition: Box::new(condition),
-                                body: Box::new(body),
-                            },
-                        };
-                    }
-                    _ => self.unexpected_token(state, format_args!("expression")),
-                }
-            };
+            // Extract simple expression
+            let mut expr = self.expression_parser_extract_simple_expression(state, &mut stack);
             // Extract operator
             macro_rules! binary_op_impl {
                 ($operator:ident, $span:expr) => {{
-                    let left_expr =
-                        fold_stack(&mut stack, expr, Some((Operator::$operator, &$span)));
-                    stack.push(OperatorWithLeftExpr {
+                    let left_expr = self.expression_parser_fold_stack(
+                        &mut stack,
+                        expr,
+                        Some((ExpressionOperator::$operator, &$span)),
+                    );
+                    stack.push(ExpressionOperatorWithLeftExpr {
                         operator_span: $span.clone(),
-                        operator: Operator::$operator,
+                        operator: ExpressionOperator::$operator,
                         left_expr: Some(left_expr),
                     });
                 }};
@@ -1423,7 +1434,8 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
             while let Some(token) = self.peek_token(state) {
                 match token.kind {
                     kind if end_token_kinds.contains(&kind) => {
-                        break 'parser_loop fold_stack(&mut stack, expr, None);
+                        break 'parser_loop self
+                            .expression_parser_fold_stack(&mut stack, expr, None);
                     }
                     TokenKind::ColonColon => {
                         let coloncolon = self.extract_token(state);
@@ -1451,10 +1463,10 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                     TokenKind::Dot => {
                         let span_start = state.start_span();
                         self.extract_token(state);
-                        let left_expr = fold_stack(
+                        let left_expr = self.expression_parser_fold_stack(
                             &mut stack,
                             expr,
-                            Some((Operator::Dot, &self.end_span(state, &span_start))),
+                            Some((ExpressionOperator::Dot, &self.end_span(state, &span_start))),
                         );
                         let member_kind = match self.peek_token(state) {
                             None => {
@@ -1503,7 +1515,11 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                             )
                             .elems;
                         let span = self.end_span(state, &span_start);
-                        let left_expr = fold_stack(&mut stack, expr, Some((Operator::Call, &span)));
+                        let left_expr = self.expression_parser_fold_stack(
+                            &mut stack,
+                            expr,
+                            Some((ExpressionOperator::Call, &span)),
+                        );
                         expr = Expression {
                             span: self.overspan(&left_expr.span, &span),
                             kind: ExpressionKind::Call {
@@ -1554,8 +1570,11 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                         let span_start = state.start_span();
                         self.extract_token(state);
                         let as_span = self.end_span(state, &span_start);
-                        let left_expr =
-                            fold_stack(&mut stack, expr, Some((Operator::CastAs, &as_span)));
+                        let left_expr = self.expression_parser_fold_stack(
+                            &mut stack,
+                            expr,
+                            Some((ExpressionOperator::CastAs, &as_span)),
+                        );
                         let r#type = self.extract_type(state);
                         expr = Expression {
                             span: self.overspan(&left_expr.span, &r#type.span),
@@ -1570,11 +1589,11 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
             }
             // Extract operator that needs right expression
             let Some(token) = self.peek_token(state) else {
-                break fold_stack(&mut stack, expr, None);
+                break self.expression_parser_fold_stack(&mut stack, expr, None);
             };
             match token.kind {
                 kind if end_token_kinds.contains(&kind) => {
-                    break fold_stack(&mut stack, expr, None);
+                    break self.expression_parser_fold_stack(&mut stack, expr, None);
                 }
                 TokenKind::Equals => binary_op!(Equal),
                 TokenKind::PlusEquals => binary_op!(PlusEqual),
@@ -1664,7 +1683,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                         }
                     }
                 }
-                _ => break fold_stack(&mut stack, expr, None),
+                _ => break self.expression_parser_fold_stack(&mut stack, expr, None),
             }
         }
     }
