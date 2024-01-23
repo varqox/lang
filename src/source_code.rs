@@ -1,7 +1,14 @@
+use std::path::PathBuf;
+
 #[derive(Debug)]
 pub struct Program {
     pub code: String,
-    pub filename: String,
+    pub path: PathBuf,
+}
+
+pub enum MsgKind {
+    Error,
+    Note,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,13 +56,17 @@ impl Program {
         last_location
     }
 
-    pub fn error_on(
+    fn print_msg_on(
         &self,
         slice: &str,
-        error_msg: core::fmt::Arguments,
+        kind: MsgKind,
+        msg: core::fmt::Arguments,
         comment_msg: core::fmt::Arguments,
-    ) -> ! {
-        bunt::eprintln!("{$red+bold}error{/$}{$bold}: {}{/$}", error_msg);
+    ) {
+        match kind {
+            MsgKind::Error => bunt::eprintln!("{$red+bold}error{/$}{$bold}: {}{/$}", msg),
+            MsgKind::Note => bunt::eprintln!("{$cyan+bold}note{/$}{$bold}: {}{/$}", msg),
+        }
         let span = self.slice_to_span(slice);
         // We will show either:
         // abc
@@ -76,7 +87,7 @@ impl Program {
         bunt::eprintln!(
             "{:line_num_width$}{$bold+blue}-->{/$} {}:{}:{}",
             "",
-            self.filename,
+            self.path.as_path().display(),
             first_loc_info.line,
             first_loc_info.line_pos,
             line_num_width = line_num_width
@@ -134,12 +145,20 @@ impl Program {
                 State::AfterSpan => {}
             }
             if c == '\n' {
-                bunt::eprintln!(
-                    "{$bold+blue}{:line_num_width$} |{/$} {[bold+red]}",
-                    "",
-                    line_comment,
-                    line_num_width = line_num_width
-                );
+                match kind {
+                    MsgKind::Error => bunt::eprintln!(
+                        "{$bold+blue}{:line_num_width$} |{/$} {[bold+red]}",
+                        "",
+                        line_comment,
+                        line_num_width = line_num_width
+                    ),
+                    MsgKind::Note => bunt::eprintln!(
+                        "{$bold+blue}{:line_num_width$} |{/$} {[bold+cyan]}",
+                        "",
+                        line_comment,
+                        line_num_width = line_num_width
+                    ),
+                }
                 line_comment = String::new();
 
                 next_loc_info = LocationInfo {
@@ -169,14 +188,36 @@ impl Program {
             }
             State::AfterSpan => {}
         }
-        bunt::eprintln!(
-            "\n{$bold+blue}{:line_num_width$} |{/$} {[bold+red]} {[bold+red]}",
-            "",
-            line_comment,
-            comment_msg,
-            line_num_width = line_num_width
-        );
 
+        match kind {
+            MsgKind::Error => bunt::eprintln!(
+                "\n{$bold+blue}{:line_num_width$} |{/$} {[bold+red]} {[bold+red]}",
+                "",
+                line_comment,
+                comment_msg,
+                line_num_width = line_num_width
+            ),
+            MsgKind::Note => bunt::eprintln!(
+                "\n{$bold+blue}{:line_num_width$} |{/$} {[bold+cyan]} {[bold+cyan]}",
+                "",
+                line_comment,
+                comment_msg,
+                line_num_width = line_num_width
+            ),
+        }
+    }
+
+    pub fn error_on(
+        &self,
+        slice: &str,
+        error_msg: core::fmt::Arguments,
+        comment_msg: core::fmt::Arguments,
+        notes: &mut dyn Iterator<Item = (&str, core::fmt::Arguments, core::fmt::Arguments)>,
+    ) -> ! {
+        self.print_msg_on(slice, MsgKind::Error, error_msg, comment_msg);
+        for note in notes {
+            self.print_msg_on(note.0, MsgKind::Note, note.1, note.2);
+        }
         std::process::exit(1)
     }
 }

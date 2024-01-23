@@ -11,10 +11,10 @@ struct CmdArgs {
     source: String,
 }
 
-mod source_code;
 mod lexer;
+mod module_tree;
 mod parser;
-mod type_checker;
+mod source_code;
 
 fn main() -> Result<()> {
     bunt::set_stderr_color_choice(if io::stderr().is_terminal() {
@@ -24,20 +24,14 @@ fn main() -> Result<()> {
     });
 
     let args = CmdArgs::parse();
-    let source_code = if args.source == "-" {
-        source_code::Program {
-            code: io::read_to_string(io::stdin())?,
-            filename: "source".to_string(),
-        }
-    } else {
-        source_code::Program {
-            code: io::read_to_string(File::open(&args.source)?)?,
-            filename: args.source,
-        }
+
+    let source_code = source_code::Program {
+        code: io::read_to_string(File::open(&args.source)?)?,
+        path: args.source.into(),
     };
-    let lexed_program = lexer::lex(&source_code);
-    let parsed_program = parser::parse(&lexed_program);
-    dbg!(&parsed_program);
+    let lexed_program = lexer::lex(source_code);
+    let parsed_program = parser::parse(lexed_program);
+    let module_tree = module_tree::build(parsed_program);
 
     Ok(())
 }

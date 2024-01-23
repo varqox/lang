@@ -49,8 +49,9 @@
 // abc + (42, 8);
 // abc + (42, 8,);
 
-mod test;
-pub mod pub_mod;
+mod test {
+    pub mod pub_mod;
+}
 
 struct A {}
 

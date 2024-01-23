@@ -211,43 +211,75 @@ pub struct Token<'code> {
     pub slice: &'code str,
 }
 
-#[derive(Debug)]
-pub struct Program<'code> {
-    pub source_code: &'code source_code::Program,
-    pub tokens: Vec<Token<'code>>,
-}
+type Tokens<'code> = Vec<Token<'code>>;
 
-impl<'code> Program<'code> {
-    pub fn error_on(
+self_cell::self_cell!(
+    pub struct Program {
+        owner: source_code::Program,
+        #[covariant]
+        dependent: Tokens,
+    }
+
+    impl {Debug}
+);
+
+impl Program {
+    pub fn source_code(&self) -> &source_code::Program {
+        self.borrow_owner()
+    }
+
+    pub fn tokens(&self) -> &Tokens {
+        self.borrow_dependent()
+    }
+
+    pub fn error_on<'code>(
         &self,
         tokens: &[Token<'code>],
         error_msg: core::fmt::Arguments,
         comment_msg: core::fmt::Arguments,
+        notes: &mut dyn Iterator<
+            Item = (&[Token<'code>], core::fmt::Arguments, core::fmt::Arguments),
+        >,
     ) -> ! {
         assert!(!tokens.is_empty());
-        let start = self.source_code
-            .slice_to_span(tokens.first().unwrap().slice)
-            .start;
-        let end = self.source_code.slice_to_span(tokens.last().unwrap().slice).end;
-        self.source_code.error_on(&self.source_code.code[start..end], error_msg, comment_msg);
+        let tokens_to_source_span = |tokens: &[Token<'code>]| {
+            let start = self
+                .source_code()
+                .slice_to_span(tokens.first().unwrap().slice)
+                .start;
+            let end = self
+                .source_code()
+                .slice_to_span(tokens.last().unwrap().slice)
+                .end;
+            &self.source_code().code[start..end]
+        };
+        self.source_code().error_on(
+            tokens_to_source_span(tokens),
+            error_msg,
+            comment_msg,
+            &mut notes.map(|(tokens, msg, comment)| (tokens_to_source_span(tokens), msg, comment)),
+        );
     }
 }
 
-pub fn lex<'code>(source_code: &'code source_code::Program) -> Program<'code> {
-    let mut lexer = TokenKind::lexer(&source_code.code);
-    let mut tokens = Vec::new();
-    while let Some(kind_res) = lexer.next() {
-        match kind_res {
-            Ok(kind) => tokens.push(Token {
-                kind,
-                slice: lexer.slice(),
-            }),
-            Err(_) => source_code.error_on(
-                lexer.slice(),
-                format_args!("cannot lex token"),
-                format_args!("unknown token"),
-            ),
+pub fn lex(source_code: source_code::Program) -> Program {
+    Program::new(source_code, |source_code| {
+        let mut lexer = TokenKind::lexer(&source_code.code);
+        let mut tokens = Vec::new();
+        while let Some(kind_res) = lexer.next() {
+            match kind_res {
+                Ok(kind) => tokens.push(Token {
+                    kind,
+                    slice: lexer.slice(),
+                }),
+                Err(_) => source_code.error_on(
+                    lexer.slice(),
+                    format_args!("cannot lex token"),
+                    format_args!("unknown token"),
+                    &mut [].into_iter(),
+                ),
+            }
         }
-    }
-    Program { source_code, tokens }
+        tokens
+    })
 }

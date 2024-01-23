@@ -1,424 +1,349 @@
-use crate::lexer::{self, Token, TokenKind};
+use crate::{
+    lexer::{self, Token, TokenKind},
+    source_code,
+};
 
-pub type Span<'code, 'lexed> = &'lexed [Token<'code>];
+pub type Span<'lexed> = &'lexed [Token<'lexed>];
 
-#[derive(Debug)]
-pub struct Program<'code, 'lexed> {
-    pub lexed_program: &'lexed lexer::Program<'code>,
-    pub span: Span<'code, 'lexed>,
-    pub items: Vec<Item<'code, 'lexed>>,
+type Items<'lexed> = Vec<Item<'lexed>>;
+
+self_cell::self_cell!(
+    pub struct Program {
+        owner: lexer::Program,
+        #[covariant]
+        dependent: Items,
+    }
+
+    impl {Debug}
+);
+
+impl Program {
+    pub fn lexed_program(&self) -> &lexer::Program {
+        self.borrow_owner()
+    }
+
+    pub fn items(&self) -> &Items {
+        self.borrow_dependent()
+    }
 }
 
 #[derive(Debug)]
-pub struct Item<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub outer_attributes: Vec<OuterAttribute<'code, 'lexed>>,
+pub struct Item<'lexed> {
+    pub span: Span<'lexed>,
+    pub outer_attributes: Vec<OuterAttribute<'lexed>>,
     pub visibility: Visibility,
-    pub kind: ItemKind<'code, 'lexed>,
+    pub kind: ItemKind<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct OuterAttribute<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub attribute_tree: AttributeTree<'code, 'lexed>,
+pub struct OuterAttribute<'lexed> {
+    pub span: Span<'lexed>,
+    pub attribute_tree: AttributeTree<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct AttributeTree<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: Identifier<'code, 'lexed>,
-    pub subtrees: Option<Vec<AttributeTree<'code, 'lexed>>>,
+pub struct AttributeTree<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: Identifier<'lexed>,
+    pub subtrees: Option<Vec<AttributeTree<'lexed>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Visibility {
     Public,
     Private,
 }
 
 #[derive(Debug)]
-pub enum ItemKind<'code, 'lexed> {
-    Module(Module<'code, 'lexed>),
-    Struct(Struct<'code, 'lexed>),
-    TupleStruct(TupleStruct<'code, 'lexed>),
-    Function(Function<'code, 'lexed>),
-    Use(Use<'code, 'lexed>),
-    TypeAlias(TypeAlias<'code, 'lexed>),
-    Constant(Constant<'code, 'lexed>),
+pub enum ItemKind<'lexed> {
+    Module(Module<'lexed>),
+    Struct(Struct<'lexed>),
+    TupleStruct(TupleStruct<'lexed>),
+    Function(Function<'lexed>),
+    Use(Use<'lexed>),
+    TypeAlias(TypeAlias<'lexed>),
+    Constant(Constant<'lexed>),
 }
 
 #[derive(Debug)]
-pub struct Module<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: Identifier<'code, 'lexed>,
-    pub items: Option<Vec<Item<'code, 'lexed>>>,
+pub struct Module<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: Identifier<'lexed>,
+    pub items: Option<Vec<Item<'lexed>>>,
 }
 
 #[derive(Debug)]
-pub struct TupleStruct<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: Identifier<'code, 'lexed>,
-    pub generic_params: Option<Vec<GenericParam<'code, 'lexed>>>,
-    pub field_types: Vec<TupleStructField<'code, 'lexed>>,
+pub struct TupleStruct<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: Identifier<'lexed>,
+    pub generic_params: Option<Vec<GenericParam<'lexed>>>,
+    pub field_types: Vec<TupleStructField<'lexed>>,
 }
 
 #[derive(Debug)]
-pub struct TupleStructField<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
+pub struct TupleStructField<'lexed> {
+    pub span: Span<'lexed>,
     pub visibility: Visibility,
-    pub r#type: Type<'code, 'lexed>,
+    pub r#type: Type<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct Struct<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: Identifier<'code, 'lexed>,
-    pub generic_params: Option<Vec<GenericParam<'code, 'lexed>>>,
-    pub fields: Vec<StructField<'code, 'lexed>>,
+pub struct Struct<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: Identifier<'lexed>,
+    pub generic_params: Option<Vec<GenericParam<'lexed>>>,
+    pub fields: Vec<StructField<'lexed>>,
 }
 
 #[derive(Debug)]
-pub struct StructField<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
+pub struct StructField<'lexed> {
+    pub span: Span<'lexed>,
     pub visibility: Visibility,
-    pub name: Identifier<'code, 'lexed>,
-    pub r#type: Type<'code, 'lexed>,
+    pub name: Identifier<'lexed>,
+    pub r#type: Type<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct Function<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: Identifier<'code, 'lexed>,
-    pub generic_params: Option<Vec<GenericParam<'code, 'lexed>>>,
-    pub params: Vec<FunctionParam<'code, 'lexed>>,
-    pub return_type: Option<Type<'code, 'lexed>>,
-    pub body: BlockExpression<'code, 'lexed>,
+pub struct Function<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: Identifier<'lexed>,
+    pub generic_params: Option<Vec<GenericParam<'lexed>>>,
+    pub params: Vec<FunctionParam<'lexed>>,
+    pub return_type: Option<Type<'lexed>>,
+    pub body: BlockExpression<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct FunctionParam<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
+pub struct FunctionParam<'lexed> {
+    pub span: Span<'lexed>,
     pub mutable: bool,
-    pub name: Identifier<'code, 'lexed>,
-    pub r#type: Type<'code, 'lexed>,
+    pub name: Identifier<'lexed>,
+    pub r#type: Type<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct TypeAlias<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: Identifier<'code, 'lexed>,
-    pub generic_params: Option<Vec<GenericParam<'code, 'lexed>>>,
-    pub r#type: Type<'code, 'lexed>,
+pub struct TypeAlias<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: Identifier<'lexed>,
+    pub generic_params: Option<Vec<GenericParam<'lexed>>>,
+    pub r#type: Type<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct Use<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub path: Path<'code, 'lexed>,
+pub struct Use<'lexed> {
+    pub span: Span<'lexed>,
+    pub path: Path<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct Constant<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: Identifier<'code, 'lexed>,
-    pub generic_params: Option<Vec<GenericParam<'code, 'lexed>>>,
-    pub r#type: Option<Type<'code, 'lexed>>,
-    pub value: Expression<'code, 'lexed>,
+pub struct Constant<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: Identifier<'lexed>,
+    pub generic_params: Option<Vec<GenericParam<'lexed>>>,
+    pub r#type: Option<Type<'lexed>>,
+    pub value: Expression<'lexed>,
 }
 
 #[derive(Debug)]
-pub struct Type<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub kind: TypeKind<'code, 'lexed>,
+pub struct Type<'lexed> {
+    pub span: Span<'lexed>,
+    pub kind: TypeKind<'lexed>,
 }
 
 #[derive(Debug)]
-pub enum TypeKind<'code, 'lexed> {
+pub enum TypeKind<'lexed> {
     Never,
-    Path(Path<'code, 'lexed>),
-    Tuple(Vec<Type<'code, 'lexed>>),
-    Array(Box<Type<'code, 'lexed>>, Expression<'code, 'lexed>),
+    Path(Path<'lexed>),
+    Tuple(Vec<Type<'lexed>>),
+    Array(Box<Type<'lexed>>, Expression<'lexed>),
     Reference {
         mutable: bool,
-        r#type: Box<Type<'code, 'lexed>>,
+        r#type: Box<Type<'lexed>>,
     },
 }
 
 #[derive(Debug)]
-pub struct Path<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
+pub struct Path<'lexed> {
+    pub span: Span<'lexed>,
     pub global: bool,
-    pub segments: Vec<PathSegment<'code, 'lexed>>,
+    pub segments: Vec<PathSegment<'lexed>>,
 }
 
 #[derive(Debug)]
-pub struct PathSegment<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub identifier: Identifier<'code, 'lexed>,
-    pub generic_args: Option<Vec<Expression<'code, 'lexed>>>,
+pub struct PathSegment<'lexed> {
+    pub span: Span<'lexed>,
+    pub identifier: Identifier<'lexed>,
+    pub generic_args: Option<Vec<Expression<'lexed>>>,
 }
 
 #[derive(Debug)]
-pub struct GenericParam<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub kind: GenericParamKind<'code, 'lexed>,
+pub struct GenericParam<'lexed> {
+    pub span: Span<'lexed>,
+    pub kind: GenericParamKind<'lexed>,
 }
 
 #[derive(Debug)]
-pub enum GenericParamKind<'code, 'lexed> {
+pub enum GenericParamKind<'lexed> {
     Type {
-        name: Identifier<'code, 'lexed>,
+        name: Identifier<'lexed>,
     },
     ConstValue {
-        name: Identifier<'code, 'lexed>,
-        r#type: Type<'code, 'lexed>,
+        name: Identifier<'lexed>,
+        r#type: Type<'lexed>,
     },
 }
 
 #[derive(Debug)]
-pub struct Expression<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub kind: ExpressionKind<'code, 'lexed>,
+pub struct Expression<'lexed> {
+    pub span: Span<'lexed>,
+    pub kind: ExpressionKind<'lexed>,
 }
 
 #[derive(Debug)]
-pub enum ExpressionKind<'code, 'lexed> {
+pub enum ExpressionKind<'lexed> {
     Underscore,
     Continue,
     Break,
-    IntegerLiteral(IntegerLiteral<'code, 'lexed>),
+    IntegerLiteral(IntegerLiteral<'lexed>),
     ByteLiteral(u8),
     ByteStringLiteral(Vec<u8>),
-    Path(Path<'code, 'lexed>),
-    Tuple(Vec<Expression<'code, 'lexed>>),
-    ArrayLiteral(Vec<Expression<'code, 'lexed>>),
-    ArrayWithSize(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    Block(Box<BlockExpression<'code, 'lexed>>),
-    Return(Box<Expression<'code, 'lexed>>),
-    BoolNegation(Box<Expression<'code, 'lexed>>),
-    ArithmeticNegation(Box<Expression<'code, 'lexed>>),
+    Path(Path<'lexed>),
+    Tuple(Vec<Expression<'lexed>>),
+    ArrayLiteral(Vec<Expression<'lexed>>),
+    ArrayWithSize(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    Block(Box<BlockExpression<'lexed>>),
+    Return(Box<Expression<'lexed>>),
+    BoolNegation(Box<Expression<'lexed>>),
+    ArithmeticNegation(Box<Expression<'lexed>>),
     // Assign
-    Assign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    PlusAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    MinusAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    MultiplyAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    DivideAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    DivideRemainderAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicOrAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicAndAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicXorAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicShiftLeftAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicShiftRightAssign(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
+    Assign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    PlusAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    MinusAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    MultiplyAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    DivideAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    DivideRemainderAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicOrAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicAndAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicXorAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicShiftLeftAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicShiftRightAssign(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
     // Logic
-    LogicOr(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicAnd(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicXor(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicShiftLeft(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LogicShiftRight(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
+    LogicOr(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicAnd(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicXor(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicShiftLeft(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LogicShiftRight(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
     // Arithmetic
-    Plus(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    Minus(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    Multiply(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    Divide(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    DivideRemainter(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
+    Plus(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    Minus(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    Multiply(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    Divide(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    DivideRemainter(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
     // Compare
-    CompareEqual(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    CompareNotEqual(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    CompareGreater(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    CompareGreaterEqual(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    CompareLess(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    CompareLessEqual(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
+    CompareEqual(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    CompareNotEqual(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    CompareGreater(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    CompareGreaterEqual(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    CompareLess(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    CompareLessEqual(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
     // Lazy bool
-    LazyBoolAnd(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
-    LazyBoolOr(
-        Box<Expression<'code, 'lexed>>,
-        Box<Expression<'code, 'lexed>>,
-    ),
+    LazyBoolAnd(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
+    LazyBoolOr(Box<Expression<'lexed>>, Box<Expression<'lexed>>),
     // Reference
-    TakeReference(Box<Expression<'code, 'lexed>>),
-    TakeMutReference(Box<Expression<'code, 'lexed>>),
-    Dereference(Box<Expression<'code, 'lexed>>),
+    TakeReference(Box<Expression<'lexed>>),
+    TakeMutReference(Box<Expression<'lexed>>),
+    Dereference(Box<Expression<'lexed>>),
     // Other
     Call {
-        callee: Box<Expression<'code, 'lexed>>,
-        args: Vec<Expression<'code, 'lexed>>,
+        callee: Box<Expression<'lexed>>,
+        args: Vec<Expression<'lexed>>,
     },
     Cast {
-        expr: Box<Expression<'code, 'lexed>>,
-        r#type: Box<Type<'code, 'lexed>>,
+        expr: Box<Expression<'lexed>>,
+        r#type: Box<Type<'lexed>>,
     },
     MemberExpression {
-        obj: Box<Expression<'code, 'lexed>>,
-        member: Member<'code, 'lexed>,
+        obj: Box<Expression<'lexed>>,
+        member: Member<'lexed>,
     },
-    If(Box<IfExpression<'code, 'lexed>>),
-    Const(Box<Expression<'code, 'lexed>>),
-    Loop(Box<BlockExpression<'code, 'lexed>>),
+    If(Box<IfExpression<'lexed>>),
+    Const(Box<Expression<'lexed>>),
+    Loop(Box<BlockExpression<'lexed>>),
     WhileLoop {
-        condition: Box<Expression<'code, 'lexed>>,
-        body: Box<BlockExpression<'code, 'lexed>>,
+        condition: Box<Expression<'lexed>>,
+        body: Box<BlockExpression<'lexed>>,
     },
 }
 
 #[derive(Debug)]
-pub enum Member<'code, 'lexed> {
-    Identifier(Identifier<'code, 'lexed>),
-    IntegerLiteral(IntegerLiteral<'code, 'lexed>),
+pub enum Member<'lexed> {
+    Identifier(Identifier<'lexed>),
+    IntegerLiteral(IntegerLiteral<'lexed>),
 }
 
 #[derive(Debug)]
-pub struct IfExpression<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub condition: Expression<'code, 'lexed>,
-    pub true_branch: BlockExpression<'code, 'lexed>,
-    pub r#else: Option<ElseExpression<'code, 'lexed>>,
+pub struct IfExpression<'lexed> {
+    pub span: Span<'lexed>,
+    pub condition: Expression<'lexed>,
+    pub true_branch: BlockExpression<'lexed>,
+    pub r#else: Option<ElseExpression<'lexed>>,
 }
 
 #[derive(Debug)]
-pub enum ElseExpression<'code, 'lexed> {
-    If(Box<IfExpression<'code, 'lexed>>),
-    Block(BlockExpression<'code, 'lexed>),
+pub enum ElseExpression<'lexed> {
+    If(Box<IfExpression<'lexed>>),
+    Block(BlockExpression<'lexed>),
 }
 
 #[derive(Debug)]
-pub struct BlockExpression<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub statements: Vec<Statement<'code, 'lexed>>,
-    pub final_expression: Option<Expression<'code, 'lexed>>,
+pub struct BlockExpression<'lexed> {
+    pub span: Span<'lexed>,
+    pub statements: Vec<Statement<'lexed>>,
+    pub final_expression: Option<Expression<'lexed>>,
 }
 
 #[derive(Debug)]
-pub struct Statement<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub kind: StatementKind<'code, 'lexed>,
+pub struct Statement<'lexed> {
+    pub span: Span<'lexed>,
+    pub kind: StatementKind<'lexed>,
 }
 
 #[derive(Debug)]
-pub enum StatementKind<'code, 'lexed> {
-    Expression(Expression<'code, 'lexed>),
+pub enum StatementKind<'lexed> {
+    Expression(Expression<'lexed>),
     Let {
         mutable: bool,
-        name: Identifier<'code, 'lexed>,
-        r#type: Option<Type<'code, 'lexed>>,
-        value: Expression<'code, 'lexed>,
+        name: Identifier<'lexed>,
+        r#type: Option<Type<'lexed>>,
+        value: Expression<'lexed>,
     },
     Const {
-        name: Identifier<'code, 'lexed>,
-        r#type: Option<Type<'code, 'lexed>>,
-        value: Expression<'code, 'lexed>,
+        name: Identifier<'lexed>,
+        r#type: Option<Type<'lexed>>,
+        value: Expression<'lexed>,
     },
 }
 
 #[derive(Debug)]
-pub struct Identifier<'code, 'lexed> {
-    pub span: Span<'code, 'lexed>,
-    pub name: &'code str,
+pub struct Identifier<'lexed> {
+    pub span: Span<'lexed>,
+    pub name: &'lexed str,
 }
 
 #[derive(Debug)]
-pub struct IntegerLiteral<'code, 'lexed> {
-    span: Span<'code, 'lexed>,
+pub struct IntegerLiteral<'lexed> {
+    span: Span<'lexed>,
     value: String,
-    suffix: &'code str,
+    suffix: &'lexed str,
 }
 
-struct Parser<'code, 'lexed> {
-    lexed_program: &'lexed lexer::Program<'code>,
+struct Parser<'lexed> {
+    source_code: &'lexed source_code::Program,
+    lexed_program: &'lexed lexer::Program,
 }
 
 struct State {
     current_token_idx: usize,
-}
-
-struct SpanStart {
-    token_idx: usize,
 }
 
 impl State {
@@ -427,6 +352,10 @@ impl State {
             token_idx: self.current_token_idx,
         }
     }
+}
+
+struct SpanStart {
+    token_idx: usize,
 }
 
 fn slices_meet(a: &str, b: &str) -> bool {
@@ -440,9 +369,9 @@ struct ExtractedSequence<T> {
 }
 
 #[derive(Debug)]
-enum StructOrTupleStruct<'code, 'lexed> {
-    Struct(Struct<'code, 'lexed>),
-    TupleStruct(TupleStruct<'code, 'lexed>),
+enum StructOrTupleStruct<'lexed> {
+    Struct(Struct<'lexed>),
+    TupleStruct(TupleStruct<'lexed>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -599,76 +528,80 @@ impl ExpressionOperator {
     }
 }
 #[derive(Debug)]
-struct ExpressionOperatorWithLeftExpr<'code, 'lexed> {
-    operator_span: Span<'code, 'lexed>,
+struct ExpressionOperatorWithLeftExpr<'lexed> {
+    operator_span: Span<'lexed>,
     operator: ExpressionOperator,
-    left_expr: Option<Expression<'code, 'lexed>>,
+    left_expr: Option<Expression<'lexed>>,
 }
 
-impl<'code, 'lexed> Parser<'code, 'lexed> {
-    fn end_span(&self, state: &State, span_start: &SpanStart) -> Span<'code, 'lexed> {
-        &self.lexed_program.tokens[span_start.token_idx..state.current_token_idx]
+impl<'lexed> Parser<'lexed> {
+    fn end_span(&self, state: &State, span_start: &SpanStart) -> Span<'lexed> {
+        &self.lexed_program.tokens()[span_start.token_idx..state.current_token_idx]
     }
 
-    fn overspan(&self, a: &Span, b: &Span) -> Span<'code, 'lexed> {
-        let base = self.lexed_program.tokens[..].as_ptr() as usize;
+    fn overspan(&self, a: &Span, b: &Span) -> Span<'lexed> {
+        let base = self.lexed_program.tokens()[..].as_ptr() as usize;
         let start = a.as_ptr() as usize;
         let end = b[b.len()..].as_ptr() as usize;
         assert!(start >= base);
         assert!(end >= base);
         const ELEM_SIZE: usize = std::mem::size_of::<Token>();
-        &self.lexed_program.tokens[((start - base) / ELEM_SIZE)..((end - base) / ELEM_SIZE)]
+        &self.lexed_program.tokens()[((start - base) / ELEM_SIZE)..((end - base) / ELEM_SIZE)]
     }
 
     fn missing_token(&self, state: &State, missing_tokens: core::fmt::Arguments) -> ! {
-        let slice = if state.current_token_idx == self.lexed_program.tokens.len() {
-            &self.lexed_program.source_code.code.as_str()
-                [self.lexed_program.source_code.code.len()..]
+        let slice = if state.current_token_idx == self.lexed_program.tokens().len() {
+            &self.source_code.code.as_str()[self.source_code.code.len()..]
         } else if state.current_token_idx == 0 {
-            &self.lexed_program.source_code.code.as_str()[0..0]
+            &self.source_code.code.as_str()[0..0]
         } else {
-            let slice = self.lexed_program.tokens[state.current_token_idx - 1].slice;
+            let slice = self.lexed_program.tokens()[state.current_token_idx - 1].slice;
             &slice[slice.len()..]
         };
-        self.lexed_program.source_code.error_on(
+        self.source_code.error_on(
             &slice,
             format_args!("missing token: {}", missing_tokens),
             format_args!("missing {}", missing_tokens),
+            &mut [].into_iter(),
         );
     }
 
     fn unexpected_eof(&self, expected: core::fmt::Arguments) -> ! {
-        self.lexed_program.source_code.error_on(
-            &self.lexed_program.source_code.code[self.lexed_program.source_code.code.len()..],
+        self.source_code.error_on(
+            &self.source_code.code[self.source_code.code.len()..],
             format_args!("unexpected end of file, expected {}", expected),
             format_args!("expected {}", expected),
+            &mut [].into_iter(),
         );
     }
 
     fn unexpected_token(&self, state: &State, expected: core::fmt::Arguments) -> ! {
-        let token = &self.lexed_program.tokens[state.current_token_idx];
-        self.lexed_program.source_code.error_on(
+        let token = &self.lexed_program.tokens()[state.current_token_idx];
+        self.source_code.error_on(
             token.slice,
             format_args!("unexpected token {}, expected {}", token.kind, expected),
             format_args!("expected {}", expected),
+            &mut [].into_iter(),
         );
     }
 
-    fn peek_token(&self, state: &State) -> Option<&'lexed Token<'code>> {
+    fn peek_token(&self, state: &State) -> Option<&'lexed Token<'lexed>> {
         self.peek_token_at(state, 0)
     }
 
-    fn peek_token_at(&self, state: &State, idx: usize) -> Option<&'lexed Token<'code>> {
-        self.lexed_program.tokens.get(state.current_token_idx + idx)
+    fn peek_token_at(&self, state: &State, idx: usize) -> Option<&'lexed Token<'lexed>> {
+        self.lexed_program
+            .tokens()
+            .get(state.current_token_idx + idx)
     }
 
-    fn extract_token(&self, state: &mut State) -> &'lexed Token<'code> {
+    fn extract_token(&self, state: &mut State) -> &'lexed Token<'lexed> {
         let token = self.peek_token(state).unwrap();
         state.current_token_idx += 1;
         token
     }
 
-    fn extract_token_of_kind(&self, state: &mut State, kind: TokenKind) -> &'lexed Token<'code> {
+    fn extract_token_of_kind(&self, state: &mut State, kind: TokenKind) -> &'lexed Token<'lexed> {
         let Some(token) = self.peek_token(state) else {
             self.unexpected_eof(format_args!("{}", kind));
         };
@@ -679,7 +612,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         self.unexpected_token(state, format_args!("{}", kind));
     }
 
-    fn extract_identifier(&self, state: &mut State) -> Identifier<'code, 'lexed> {
+    fn extract_identifier(&self, state: &mut State) -> Identifier<'lexed> {
         let span_start = state.start_span();
         let ident = self.extract_token_of_kind(state, TokenKind::Identifier);
         Identifier {
@@ -688,7 +621,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_integer_literal(&self, state: &mut State) -> IntegerLiteral<'code, 'lexed> {
+    fn extract_integer_literal(&self, state: &mut State) -> IntegerLiteral<'lexed> {
         let span_start = state.start_span();
         let integer = self.extract_token_of_kind(state, TokenKind::Integer);
         let mut value = String::new();
@@ -722,10 +655,11 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         while let Some((idx, c)) = token_chars.next() {
             if c == '\\' {
                 let Some((idx1, c1)) = token_chars.next() else {
-                    self.lexed_program.source_code.error_on(
+                    self.source_code.error_on(
                         &token.slice[idx + c.len_utf8()..idx + c.len_utf8()],
                         format_args!("missing escaped character"),
                         format_args!("missing escaped character"),
+                        &mut [].into_iter(),
                     );
                 };
                 match c1 {
@@ -738,50 +672,56 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                     't' => bytes.push(b'\t'),
                     'x' => {
                         let Some((idx2, c2)) = token_chars.next() else {
-                            self.lexed_program.source_code.error_on(
+                            self.source_code.error_on(
                                 &token.slice[idx1 + c1.len_utf8()..idx1 + c1.len_utf8()],
                                 format_args!("missing hex digit"),
                                 format_args!("missing hex digit"),
+                                &mut [].into_iter(),
                             );
                         };
                         let Some(d1) = c2.to_digit(16) else {
-                            self.lexed_program.source_code.error_on(
+                            self.source_code.error_on(
                                 &token.slice[idx2..idx2 + c2.len_utf8()],
                                 format_args!("invalid hex digit in escape sequence"),
                                 format_args!("invalid hex digit"),
+                                &mut [].into_iter(),
                             );
                         };
                         let Some((idx3, c3)) = token_chars.next() else {
-                            self.lexed_program.source_code.error_on(
+                            self.source_code.error_on(
                                 &token.slice[idx2 + c2.len_utf8()..idx2 + c2.len_utf8()],
                                 format_args!("missing hex digit"),
                                 format_args!("missing hex digit"),
+                                &mut [].into_iter(),
                             );
                         };
                         let Some(d2) = c3.to_digit(16) else {
-                            self.lexed_program.source_code.error_on(
+                            self.source_code.error_on(
                                 &token.slice[idx3..idx3 + c3.len_utf8()],
                                 format_args!("invalid hex digit in escape sequence"),
                                 format_args!("invalid hex digit"),
+                                &mut [].into_iter(),
                             );
                         };
                         bytes.push(((d1 as u8) << 4) | (d2 as u8));
                     }
                     _ => {
-                        self.lexed_program.source_code.error_on(
+                        self.source_code.error_on(
                             &token.slice[idx1..idx1 + c1.len_utf8()],
                             format_args!("invalid escape sequence in byte string literal"),
                             format_args!("invalid escape sequence"),
+                            &mut [].into_iter(),
                         );
                     }
                 }
                 continue;
             }
             if !c.is_ascii() {
-                self.lexed_program.source_code.error_on(
+                self.source_code.error_on(
                     &token.slice[idx..idx + c.len_utf8()],
                     format_args!("non-ASCII character in byte literal"),
                     format_args!("non-ASCII character in byte literal"),
+                    &mut [].into_iter(),
                 );
             }
             bytes.push(c as u8);
@@ -844,7 +784,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_type(&self, state: &mut State) -> Type<'code, 'lexed> {
+    fn extract_type(&self, state: &mut State) -> Type<'lexed> {
         let span_start = state.start_span();
         let Some(token) = self.peek_token(state) else {
             self.unexpected_eof(format_args!("type"));
@@ -913,7 +853,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_path(&self, state: &mut State) -> Path<'code, 'lexed> {
+    fn extract_path(&self, state: &mut State) -> Path<'lexed> {
         let span_start = state.start_span();
         let global = match self.peek_token(state) {
             None => self.unexpected_eof(format_args!(":: or identifier")),
@@ -986,10 +926,10 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
 
     fn expression_parser_fold_stack(
         &self,
-        stack: &mut Vec<ExpressionOperatorWithLeftExpr<'code, 'lexed>>,
-        expr: Expression<'code, 'lexed>,
-        next_op: Option<(ExpressionOperator, &Span<'code, 'lexed>)>,
-    ) -> Expression<'code, 'lexed> {
+        stack: &mut Vec<ExpressionOperatorWithLeftExpr<'lexed>>,
+        expr: Expression<'lexed>,
+        next_op: Option<(ExpressionOperator, &Span<'lexed>)>,
+    ) -> Expression<'lexed> {
         let next_op_info = next_op.as_ref().map(|(operator, _)| operator.to_info());
         let mut expr = Some(expr);
         while !stack.is_empty() {
@@ -1098,6 +1038,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                         format_args!(
                             "cannot combine these operators, use parenthesis around one of them"
                         ),
+                        &mut [].into_iter(),
                     );
                 }
                 match last_op_info.associativity {
@@ -1111,6 +1052,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                         format_args!(
                             "cannot combine these operators, use parenthesis around one of them"
                         ),
+                        &mut [].into_iter(),
                     ),
                     ExpressionOperatorAssociativity::Left => {
                         fold();
@@ -1129,8 +1071,8 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
     fn expression_parser_extract_simple_expression(
         &self,
         state: &mut State,
-        stack: &mut Vec<ExpressionOperatorWithLeftExpr<'code, 'lexed>>,
-    ) -> Expression<'code, 'lexed> {
+        stack: &mut Vec<ExpressionOperatorWithLeftExpr<'lexed>>,
+    ) -> Expression<'lexed> {
         loop {
             let expr_span_start = state.start_span();
             let Some(token) = self.peek_token(state) else {
@@ -1172,6 +1114,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                             span,
                             format_args!("empty byte literal"),
                             format_args!("empty byte literal"),
+                            &mut [].into_iter(),
                         ),
                         1 => {
                             break Expression {
@@ -1183,6 +1126,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                             span,
                             format_args!("byte literal has to have length 1"),
                             format_args!("byte literal has to have length 1"),
+                            &mut [].into_iter(),
                         ),
                     }
                 }
@@ -1403,7 +1347,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         &self,
         state: &mut State,
         end_token_kinds: &[TokenKind],
-    ) -> Expression<'code, 'lexed> {
+    ) -> Expression<'lexed> {
         let mut stack = Vec::new();
         'parser_loop: loop {
             // Extract simple expression
@@ -1453,10 +1397,11 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
                                     generic_args: None,
                                 });
                             }
-                            _ => self.lexed_program.source_code.error_on(
+                            _ => self.source_code.error_on(
                                 coloncolon.slice,
                                 format_args!("Unexpected :: operator, left side has to be a path"),
                                 format_args!("left side is not a path"),
+                                &mut [].into_iter(),
                             ),
                         }
                     }
@@ -1688,7 +1633,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_if_expression(&self, state: &mut State) -> IfExpression<'code, 'lexed> {
+    fn extract_if_expression(&self, state: &mut State) -> IfExpression<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::KeywordIf);
         let condition = self.extract_expression(state, &[TokenKind::Lbrace]);
@@ -1727,7 +1672,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_block_expression(&self, state: &mut State) -> BlockExpression<'code, 'lexed> {
+    fn extract_block_expression(&self, state: &mut State) -> BlockExpression<'lexed> {
         let block_span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::Lbrace);
         let mut statements = Vec::new();
@@ -1903,7 +1848,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_generic_param(&self, state: &mut State) -> GenericParam<'code, 'lexed> {
+    fn extract_generic_param(&self, state: &mut State) -> GenericParam<'lexed> {
         match self.peek_token(state) {
             None => self.unexpected_eof(format_args!("type or const")),
             Some(token) if token.kind == TokenKind::KeywordConst => {
@@ -1927,7 +1872,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_generic_params(&self, state: &mut State) -> Vec<GenericParam<'code, 'lexed>> {
+    fn extract_generic_params(&self, state: &mut State) -> Vec<GenericParam<'lexed>> {
         self.extract_sequence_with_optional_trailing_separator_using_function(
             state,
             TokenKind::Langle,
@@ -1939,7 +1884,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         .elems
     }
 
-    fn extract_function_param(&self, state: &mut State) -> FunctionParam<'code, 'lexed> {
+    fn extract_function_param(&self, state: &mut State) -> FunctionParam<'lexed> {
         let span_start = state.start_span();
         let mutable = match self.peek_token(state) {
             None => self.unexpected_eof(format_args!("mut or identifier")),
@@ -1960,7 +1905,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_function(&self, state: &mut State) -> Function<'code, 'lexed> {
+    fn extract_function(&self, state: &mut State) -> Function<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::KeywordFn);
         let name = self.extract_identifier(state);
@@ -2010,7 +1955,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_struct_field(&self, state: &mut State) -> StructField<'code, 'lexed> {
+    fn extract_struct_field(&self, state: &mut State) -> StructField<'lexed> {
         let span_start = state.start_span();
         let visibility = self.extract_visibility(state);
         let name = self.extract_identifier(state);
@@ -2024,7 +1969,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_tuple_struct_field(&self, state: &mut State) -> TupleStructField<'code, 'lexed> {
+    fn extract_tuple_struct_field(&self, state: &mut State) -> TupleStructField<'lexed> {
         let span_start = state.start_span();
         let visibility = self.extract_visibility(state);
         let r#type = self.extract_type(state);
@@ -2035,10 +1980,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_struct_or_tuple_struct(
-        &self,
-        state: &mut State,
-    ) -> StructOrTupleStruct<'code, 'lexed> {
+    fn extract_struct_or_tuple_struct(&self, state: &mut State) -> StructOrTupleStruct<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::KeywordStruct);
         let name = self.extract_identifier(state);
@@ -2097,7 +2039,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_type_alias(&self, state: &mut State) -> TypeAlias<'code, 'lexed> {
+    fn extract_type_alias(&self, state: &mut State) -> TypeAlias<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::KeywordType);
         let name = self.extract_identifier(state);
@@ -2119,7 +2061,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_use(&self, state: &mut State) -> Use<'code, 'lexed> {
+    fn extract_use(&self, state: &mut State) -> Use<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::KeywordUse);
         let path = self.extract_path(state);
@@ -2130,7 +2072,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_constant(&self, state: &mut State) -> Constant<'code, 'lexed> {
+    fn extract_constant(&self, state: &mut State) -> Constant<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::KeywordConst);
         let name = self.extract_identifier(state);
@@ -2161,7 +2103,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_attribute_tree(&self, state: &mut State) -> AttributeTree<'code, 'lexed> {
+    fn extract_attribute_tree(&self, state: &mut State) -> AttributeTree<'lexed> {
         let span_start = state.start_span();
         let name = self.extract_identifier(state);
         match self.peek_token(state) {
@@ -2189,7 +2131,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_outer_attribute(&self, state: &mut State) -> OuterAttribute<'code, 'lexed> {
+    fn extract_outer_attribute(&self, state: &mut State) -> OuterAttribute<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::Hash);
         self.extract_token_of_kind(state, TokenKind::Lsquare);
@@ -2201,7 +2143,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_module(&self, state: &mut State) -> Module<'code, 'lexed> {
+    fn extract_module(&self, state: &mut State) -> Module<'lexed> {
         let span_start = state.start_span();
         self.extract_token_of_kind(state, TokenKind::KeywordMod);
         let name = self.extract_identifier(state);
@@ -2231,7 +2173,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_item(&self, state: &mut State) -> Item<'code, 'lexed> {
+    fn extract_item(&self, state: &mut State) -> Item<'lexed> {
         let span_start = state.start_span();
         let mut outer_attributes = Vec::new();
         let mut visibility = Visibility::Private;
@@ -2288,11 +2230,7 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
         }
     }
 
-    fn extract_items(
-        &self,
-        state: &mut State,
-        end_token: Option<TokenKind>,
-    ) -> Vec<Item<'code, 'lexed>> {
+    fn extract_items(&self, state: &mut State, end_token: Option<TokenKind>) -> Vec<Item<'lexed>> {
         let mut items = Vec::new();
         loop {
             match self.peek_token(state) {
@@ -2303,18 +2241,16 @@ impl<'code, 'lexed> Parser<'code, 'lexed> {
     }
 }
 
-pub fn parse<'code, 'lexed: 'code>(
-    lexed_program: &'lexed lexer::Program<'code>,
-) -> Program<'code, 'lexed> {
-    let parser = Parser { lexed_program };
-    let mut state = State {
-        current_token_idx: 0,
-    };
-    let span_start = state.start_span();
-    let items = parser.extract_items(&mut state, None);
-    Program {
-        lexed_program,
-        span: parser.end_span(&state, &span_start),
-        items,
-    }
+pub fn parse(lexed_program: lexer::Program) -> Program {
+    Program::new(lexed_program, |lexed_program| {
+        let parser = Parser {
+            source_code: lexed_program.source_code(),
+            lexed_program,
+        };
+        let mut state = State {
+            current_token_idx: 0,
+        };
+        let items = parser.extract_items(&mut state, None);
+        items
+    })
 }
