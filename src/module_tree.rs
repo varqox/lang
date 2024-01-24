@@ -146,6 +146,14 @@ pub fn build(program: parser::Program) -> ModuleTree {
             for item in items {
                 match &item.kind {
                     parser::ItemKind::Module(module) => {
+                        if item.outer_attributes.len() > 0 {
+                            program.lexed_program().error_on(
+                                item.outer_attributes.first().unwrap().span,
+                                format_args!("unsupported module attribute"),
+                                format_args!("unsupported module attribute"),
+                                &mut [].into_iter(),
+                            );
+                        }
                         module_dir_path.push(module.name.name);
                         submodules.insert(
                             module.name.name,
